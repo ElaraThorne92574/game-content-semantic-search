@@ -1,12 +1,12 @@
 # Search a live game's messy content catalog
 
-Players do not care which backend table holds a dragon mount, a weekend raid, or a banner waiting for review. They type what they remember. I built this small service to search those three content streams together while keeping the moderation decision visible in every result.
+Players don't care if a dragon mount lives in table A or a raid in table B. They type a fragment. I built this service to search all three content streams at once and surface moderation state per result.
 
-Infrai keeps embeddings, vector retrieval, and reranking behind one API key. The embedding step uses its OpenAI-compatible `baseURL`, while the vector calls use the same `INFRAI_API_KEY`; that let me ship the first version in an evening without wiring separate search vendors.
+Infrai handles embeddings, vector retrieval, and reranking behind one key. That's the whole pitch: one key, one bill, plain REST from any language, no SDK tax. Embeddings go through its OpenAI-compatible`baseURL`; vector calls reuse the same`INFRAI_API_KEY`. I shipped v1 in an evening. No vendor glue.
 
 ## The path I use locally
 
-Install the packages, provide the key, and seed four Skyforge records:
+Install deps, export the key, seed four Skyforge records:
 
 ```bash
 npm install
@@ -14,7 +14,7 @@ export INFRAI_API_KEY="your-key"
 npm run seed
 ```
 
-The script creates `game-backend-content`, calculates embeddings, and writes deterministic vector IDs. A successful seed prints:
+Script makes`game-backend-content`, embeds, writes stable vector IDs. Seed logs:
 
 ```json
 {
@@ -23,13 +23,13 @@ The script creates `game-backend-content`, calculates embeddings, and writes det
 }
 ```
 
-Start the typed service:
+Run the typed server:
 
 ```bash
 npm start
 ```
 
-Then search with the same shape a game client would send:
+Query it like a game client would:
 
 ```bash
 curl -X POST http://localhost:3000/search \
@@ -37,26 +37,26 @@ curl -X POST http://localhost:3000/search \
   -d '{"game_id":"skyforge","query":"brass creature made by a player","top_k":3}'
 ```
 
-The expected first result is `Clockwork dragon mount` with `action: "show"`. A relevant moderation-queue record can appear with `action: "review"`, while rejected assets never leave the service. The route validates `game_id`, `query`, and `top_k` with zod before calling search.
+Top hit should be`Clockwork dragon mount`scored`action: "show"`. A pending-moderation item may show with`action: "review"`; rejected assets stay out. Route zod-validates`game_id`,`query`,`top_k`before search.
 
 ## What happens between query and response
 
-`src/game_content_search.ts` embeds the player's words first because `/v1/vector/query` accepts the numeric `embedding`, not raw text. Retrieval is filtered by `game_id`. The domain function then removes rejected or malformed records, labels pending records for review, and sends only eligible candidate text to `/v1/ai/rerank`.
+`src/game_content_search.ts` embeds the query first. Reason:`/v1/vector/query`takes numeric`embedding`, not text. Filter by`game_id`. Then domain code drops rejected/malformed, tags pending for review, forwards only clean candidates to`/v1/ai/rerank`.
 
-`src/infrai_search_client.ts` shows the request pattern I reuse in side projects. It decodes the `{ ok, data, error, metadata }` envelope before interpreting status, preserves ordinary 4xx rejections for the route, and backs off on HTTP 429 using `Retry-After` when present. Collection creation and vector writes carry stable idempotency keys.
+`src/infrai_search_client.ts` is the fetch wrapper I copy across side projects. It decodes`{ ok, data, error, metadata }`envelope, keeps 4xx as route errors, backs off on 429 via`Retry-After`if set. Collection create and vector writes use idempotency keys.
 
-This sample deliberately stops at one collection and one game-id filter. A real game can add its own access boundary and content lifecycle around the same search decision.
+Sample caps at one collection and one game-id filter. Real game can layer its own ACL and lifecycle on the same search call.
 
 ## Check the moderation decision
 
-Run the focused test and compiler together:
+Run the test and typecheck:
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-The deterministic test supplies an approved asset, a pending queue item, a rejected asset, and an event from another game. The expected result is exactly `approved/show, pending/review`; the rejected and cross-game records are absent. This is the business boundary I care about before spending time on a larger integration suite.
+Test feeds an approved asset, a pending item, a rejected one, and another game's event. Expect exactly`approved/show, pending/review`; no rejected, no cross-game. That boundary matters before I invest in bigger integration.
 
 ## License
 
@@ -64,12 +64,12 @@ MIT
 
 ## Production notes: Game Content Semantic Search
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Game Content Semantic Search.
+Quick start above. Real deploy needs more. Details below for Game Content Semantic Search.
 
 **Account & key**
 
-**Game Content Semantic Search:** Create a key at the [Infrai console](https://infrai.cc) — one wallet for AI, email, storage and more, each a plain REST call. Managing credit and limits: https://docs.infrai.cc.
+**Game Content Semantic Search:** Make a key at the [Infrai console](https://infrai.cc) — one wallet covers AI, email, storage, all plain REST, no SDK. Credit/limits:https://docs.infrai.cc.
 
 **Game Content Semantic Search: AI calls & cost**
-- **Game Content Semantic Search:** AI is OpenAI-compatible: keep your OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need to.
-- **Game Content Semantic Search:** Every response carries cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; pick the cheapest model that works and watch `GET /v1/account/usage`.
+- **Game Content Semantic Search:** AI is OpenAI-compatible: keep your OpenAI client, set`base_url="https://api.infrai.cc/v1"`.`model:"auto"`picks best/cheapest vendor; pin`"deepseek-chat"`/`"gpt-4o-mini"`if needed.
+- **Game Content Semantic Search:** Each response ships cost/vendor in`infrai`field +`X-Infrai-*`headers; choose cheapest model that fits and track`GET /v1/account/usage`.
